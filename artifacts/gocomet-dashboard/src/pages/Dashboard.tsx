@@ -250,11 +250,14 @@ export default function Dashboard() {
   const [pipelineUpdated, setPipelineUpdated] = useState<Date | null>(null);
   const [topChanged, setTopChanged] = useState(false);
   const [gifFadeIn, setGifFadeIn] = useState(false);
+  const [fullScreenGif, setFullScreenGif] = useState<string | null>(null);
+  const [fullScreenGifFade, setFullScreenGifFade] = useState(false);
   const [chartJsLoaded, setChartJsLoaded] = useState(false);
 
   const fetchLeaderboard = useCallback(async () => {
     try {
-      const res = await fetch(LEADERBOARD_CSV_URL);
+      const nocacheUrl = `${LEADERBOARD_CSV_URL}&t=${Date.now()}`;
+      const res = await fetch(nocacheUrl, { cache: "no-store" });
       const text = await res.text();
       const rows = parseCSV(text);
       if (rows.length < 2) return;
@@ -269,12 +272,18 @@ export default function Dashboard() {
         .sort((a, b) => b.meetings - a.meetings);
 
       setLeaderboard((prev) => {
-        const newTop = data[0]?.name || null;
-        const oldTop = prev[0]?.name || null;
-        if (newTop && newTop !== oldTop) {
+        const newTop = data[0];
+        const oldTop = prev[0];
+        if (newTop && (!oldTop || newTop.name !== oldTop.name)) {
           setTopChanged(true);
           setGifFadeIn(false);
-          setTimeout(() => setGifFadeIn(true), 50);
+          setFullScreenGifFade(false);
+          const gifUrl = getDirectGifUrl(newTop.gifUrl);
+          if (gifUrl) {
+            setFullScreenGif(gifUrl);
+            setTimeout(() => setFullScreenGifFade(true), 100);
+          }
+          setTimeout(() => setGifFadeIn(true), 100);
         }
         return data;
       });
@@ -284,7 +293,8 @@ export default function Dashboard() {
 
   const fetchPipeline = useCallback(async () => {
     try {
-      const res = await fetch(PIPELINE_CSV_URL);
+      const nocacheUrl = `${PIPELINE_CSV_URL}&t=${Date.now()}`;
+      const res = await fetch(nocacheUrl, { cache: "no-store" });
       const text = await res.text();
       const rows = parseCSV(text);
       if (rows.length < 2) return;
@@ -337,11 +347,19 @@ export default function Dashboard() {
   }, [fetchLeaderboard, fetchPipeline]);
 
   useEffect(() => {
-    if (topChanged) {
-      const t = setTimeout(() => setTopChanged(false), 2500);
-      return () => clearTimeout(t);
-    }
+    if (!topChanged) return;
+    const t = setTimeout(() => setTopChanged(false), 2500);
+    return () => clearTimeout(t);
   }, [topChanged]);
+
+  useEffect(() => {
+    if (!fullScreenGif || !fullScreenGifFade) return;
+    const t = setTimeout(() => {
+      setFullScreenGifFade(false);
+      setTimeout(() => setFullScreenGif(null), 500);
+    }, 4500);
+    return () => clearTimeout(t);
+  }, [fullScreenGif, fullScreenGifFade]);
 
   const top1 = leaderboard[0] || null;
   const top1GifUrl = top1 ? getDirectGifUrl(top1.gifUrl) : "";
@@ -394,6 +412,36 @@ export default function Dashboard() {
         .lb-row { animation: fadeInRow 0.35s ease both; }
         .gold-row { background: linear-gradient(90deg, #FFF8E1, #FFF3CD); }
       `}</style>
+
+      {/* Full-screen GIF overlay when leader changes */}
+      {fullScreenGif && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "#000",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+            opacity: fullScreenGifFade ? 1 : 0,
+            transition: "opacity 0.5s ease",
+            pointerEvents: fullScreenGifFade ? "auto" : "none",
+          }}
+        >
+          <img
+            src={fullScreenGif}
+            alt="Leader celebration"
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              maxWidth: "100vw",
+              maxHeight: "100vh",
+            }}
+          />
+        </div>
+      )}
 
       {/* TV viewport: full screen bg, centres the 16:9 canvas */}
       <div
