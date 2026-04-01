@@ -517,7 +517,7 @@ export default function Dashboard() {
               <span
                 style={{ fontWeight: 800, fontSize: 22, color: "#fff", letterSpacing: "-0.02em" }}
               >
-                GoComet Dashboard
+                GoComet BDR Dashboard
               </span>
             </div>
 
