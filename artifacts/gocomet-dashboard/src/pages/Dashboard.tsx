@@ -7,6 +7,9 @@ const PIPELINE_CSV_URL =
 
 const REFRESH_INTERVAL = 30000;
 
+const TV_W = 1920;
+const TV_H = 1080;
+
 interface LeaderboardRow {
   name: string;
   meetings: number;
@@ -70,12 +73,25 @@ const BAR_COLORS = [
   "#A8DADC",
 ];
 
+type ChartInstance = {
+  data: {
+    labels: string[];
+    datasets: { data: number[]; backgroundColor: string[] }[];
+  };
+  update: () => void;
+  destroy: () => void;
+};
+
 function PipelineChart({ data }: { data: PipelineRow[] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const chartRef = useRef<unknown>(null);
+  const chartRef = useRef<ChartInstance | null>(null);
 
   useEffect(() => {
-    if (!canvasRef.current || data.length === 0) return;
+    const win = window as Window & {
+      Chart?: new (ctx: CanvasRenderingContext2D, config: object) => ChartInstance;
+      ChartDataLabels?: unknown;
+    };
+    if (!canvasRef.current || data.length === 0 || !win.Chart) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
@@ -86,27 +102,19 @@ function PipelineChart({ data }: { data: PipelineRow[] }) {
     const colors = data.map((_, i) => BAR_COLORS[i % BAR_COLORS.length]);
 
     if (chartRef.current) {
-      const chart = chartRef.current as {
-        data: { labels: string[]; datasets: { data: number[]; backgroundColor: string[] }[] };
-        update: () => void;
-      };
-      chart.data.labels = labels;
-      chart.data.datasets[0].data = values;
-      chart.data.datasets[0].backgroundColor = colors;
-      chart.update();
+      chartRef.current.data.labels = labels;
+      chartRef.current.data.datasets[0].data = values;
+      chartRef.current.data.datasets[0].backgroundColor = colors;
+      chartRef.current.update();
       return;
     }
 
-    const win = window as Window & { Chart?: new (...args: unknown[]) => unknown };
-    if (!win.Chart) return;
+    const plugins: unknown[] = [];
+    if (win.ChartDataLabels) plugins.push(win.ChartDataLabels);
 
-    const ChartConstructor = win.Chart as new (
-      ctx: CanvasRenderingContext2D,
-      config: object
-    ) => unknown;
-
-    chartRef.current = new ChartConstructor(ctx, {
+    chartRef.current = new win.Chart(ctx, {
       type: "bar",
+      plugins,
       data: {
         labels,
         datasets: [
@@ -114,7 +122,7 @@ function PipelineChart({ data }: { data: PipelineRow[] }) {
             label: "Pipeline",
             data: values,
             backgroundColor: colors,
-            borderRadius: 6,
+            borderRadius: 8,
             borderSkipped: false,
           },
         ],
@@ -122,13 +130,25 @@ function PipelineChart({ data }: { data: PipelineRow[] }) {
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        layout: {
+          padding: { top: 36 },
+        },
         plugins: {
           legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: (ctx: { parsed: { y: number } }) =>
-                ` ${ctx.parsed.y.toLocaleString()}`,
+          tooltip: { enabled: false },
+          datalabels: {
+            anchor: "end",
+            align: "top",
+            color: "#1A1A2E",
+            font: {
+              family: "Inter",
+              size: 16,
+              weight: "700",
             },
+            formatter: (value: number) =>
+              value >= 1000
+                ? `${(value / 1000).toFixed(1)}k`
+                : value.toLocaleString(),
           },
         },
         scales: {
@@ -136,7 +156,7 @@ function PipelineChart({ data }: { data: PipelineRow[] }) {
             grid: { display: false },
             ticks: {
               color: "#6B7280",
-              font: { family: "Inter", size: 12 },
+              font: { family: "Inter", size: 15 },
             },
           },
           y: {
@@ -144,33 +164,51 @@ function PipelineChart({ data }: { data: PipelineRow[] }) {
             grid: { color: "rgba(0,0,0,0.05)" },
             ticks: {
               color: "#6B7280",
-              font: { family: "Inter", size: 12 },
+              font: { family: "Inter", size: 14 },
             },
           },
         },
       },
     });
+
+    return () => {
+      if (chartRef.current) {
+        chartRef.current.destroy();
+        chartRef.current = null;
+      }
+    };
   }, [data]);
 
   return (
-    <div className="relative w-full h-full">
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
       <canvas ref={canvasRef} />
     </div>
   );
 }
 
 function Confetti() {
-  const pieces = Array.from({ length: 20 }, (_, i) => i);
+  const pieces = Array.from({ length: 24 }, (_, i) => i);
   const colors = ["#FF6B35", "#1E90FF", "#FFD700", "#0A1F44", "#FF8C42"];
   return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden">
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        pointerEvents: "none",
+        overflow: "hidden",
+      }}
+    >
       {pieces.map((i) => (
         <div
           key={i}
-          className="absolute w-2 h-2 rounded-sm opacity-0"
           style={{
+            position: "absolute",
+            width: 10,
+            height: 10,
+            borderRadius: 2,
+            opacity: 0,
             left: `${Math.random() * 100}%`,
-            top: "-8px",
+            top: "-12px",
             backgroundColor: colors[i % colors.length],
             animation: `confettiFall ${1.5 + Math.random() * 2}s ease-in ${Math.random() * 0.8}s forwards`,
             transform: `rotate(${Math.random() * 360}deg)`,
@@ -181,23 +219,35 @@ function Confetti() {
   );
 }
 
-function CrownIcon() {
-  return (
-    <span
-      className="mr-1 text-base"
-      style={{ filter: "drop-shadow(0 1px 2px rgba(255,165,0,0.6))" }}
-    >
-      👑
-    </span>
-  );
+interface TvLayout { scale: number; left: number; top: number; }
+
+function useTvScale(): TvLayout {
+  const [layout, setLayout] = useState<TvLayout>({ scale: 1, left: 0, top: 0 });
+
+  useEffect(() => {
+    const compute = () => {
+      const scaleX = window.innerWidth / TV_W;
+      const scaleY = window.innerHeight / TV_H;
+      const scale = Math.min(scaleX, scaleY);
+      const left = (window.innerWidth - TV_W * scale) / 2;
+      const top = (window.innerHeight - TV_H * scale) / 2;
+      setLayout({ scale, left, top });
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, []);
+
+  return layout;
 }
 
 export default function Dashboard() {
+  const { scale, left, top } = useTvScale();
+
   const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
   const [pipeline, setPipeline] = useState<PipelineRow[]>([]);
   const [leaderboardUpdated, setLeaderboardUpdated] = useState<Date | null>(null);
   const [pipelineUpdated, setPipelineUpdated] = useState<Date | null>(null);
-  const [prevTop, setPrevTop] = useState<string | null>(null);
   const [topChanged, setTopChanged] = useState(false);
   const [gifFadeIn, setGifFadeIn] = useState(false);
   const [chartJsLoaded, setChartJsLoaded] = useState(false);
@@ -222,7 +272,6 @@ export default function Dashboard() {
         const newTop = data[0]?.name || null;
         const oldTop = prev[0]?.name || null;
         if (newTop && newTop !== oldTop) {
-          setPrevTop(oldTop);
           setTopChanged(true);
           setGifFadeIn(false);
           setTimeout(() => setGifFadeIn(true), 50);
@@ -230,8 +279,7 @@ export default function Dashboard() {
         return data;
       });
       setLeaderboardUpdated(new Date());
-    } catch (_e) {
-    }
+    } catch (_e) {}
   }, []);
 
   const fetchPipeline = useCallback(async () => {
@@ -249,23 +297,33 @@ export default function Dashboard() {
         .filter((r) => r.label);
       setPipeline(data);
       setPipelineUpdated(new Date());
-    } catch (_e) {
-    }
+    } catch (_e) {}
   }, []);
 
   useEffect(() => {
-    const loadChartJs = () => {
-      const win = window as Window & { Chart?: unknown };
-      if (win.Chart) {
-        setChartJsLoaded(true);
-        return;
-      }
-      const script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/chart.js";
-      script.onload = () => setChartJsLoaded(true);
-      document.head.appendChild(script);
+    const loadScripts = async () => {
+      const win = window as Window & { Chart?: unknown; ChartDataLabels?: unknown };
+
+      await new Promise<void>((resolve) => {
+        if (win.Chart) { resolve(); return; }
+        const s = document.createElement("script");
+        s.src = "https://cdn.jsdelivr.net/npm/chart.js";
+        s.onload = () => resolve();
+        document.head.appendChild(s);
+      });
+
+      await new Promise<void>((resolve) => {
+        if (win.ChartDataLabels) { resolve(); return; }
+        const s = document.createElement("script");
+        s.src = "https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2";
+        s.onload = () => resolve();
+        document.head.appendChild(s);
+      });
+
+      setChartJsLoaded(true);
     };
-    loadChartJs();
+
+    loadScripts();
   }, []);
 
   useEffect(() => {
@@ -280,7 +338,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (topChanged) {
-      const t = setTimeout(() => setTopChanged(false), 500);
+      const t = setTimeout(() => setTopChanged(false), 2500);
       return () => clearTimeout(t);
     }
   }, [topChanged]);
@@ -288,469 +346,503 @@ export default function Dashboard() {
   const top1 = leaderboard[0] || null;
   const top1GifUrl = top1 ? getDirectGifUrl(top1.gifUrl) : "";
 
-  const formatTime = (d: Date | null) => {
-    if (!d) return "—";
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  };
+  const formatTime = (d: Date | null) =>
+    d ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
+
+  const NAV_H = 64;
+  const PADDING = 18;
+  const CONTENT_H = TV_H - NAV_H - PADDING * 2;
+  const LEFT_W = TV_W * 0.6 - PADDING * 1.5;
+  const RIGHT_W = TV_W * 0.4 - PADDING * 1.5;
+
+  const TOP1_BANNER_H = top1 ? 148 : 0;
+  const TABLE_H = CONTENT_H - TOP1_BANNER_H - 44;
 
   return (
-    <div
-      className="flex flex-col"
-      style={{
-        height: "100vh",
-        background: "#F5F7FA",
-        fontFamily: "'Inter', sans-serif",
-        overflow: "hidden",
-      }}
-    >
+    <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        html, body, #root {
+          width: 100%;
+          height: 100%;
+          background: #0A1F44;
+          overflow: hidden;
+          font-family: 'Inter', sans-serif;
+        }
 
         @keyframes confettiFall {
-          0% { transform: translateY(0) rotate(0deg); opacity: 1; }
-          100% { transform: translateY(300px) rotate(720deg); opacity: 0; }
+          0%   { transform: translateY(0)     rotate(0deg);   opacity: 1; }
+          100% { transform: translateY(400px) rotate(720deg); opacity: 0; }
         }
-
         @keyframes fadeInRow {
-          from { opacity: 0; transform: translateX(-12px); }
-          to { opacity: 1; transform: translateX(0); }
+          from { opacity: 0; transform: translateX(-14px); }
+          to   { opacity: 1; transform: translateX(0);     }
         }
-
         @keyframes fadeInGif {
-          from { opacity: 0; transform: scale(0.97); }
-          to { opacity: 1; transform: scale(1); }
+          from { opacity: 0; transform: scale(0.96); }
+          to   { opacity: 1; transform: scale(1);    }
+        }
+        @keyframes livePulse {
+          0%,100% { opacity: 1; transform: scale(1);   }
+          50%     { opacity: 0.45; transform: scale(1.4); }
         }
 
-        .leaderboard-row {
-          animation: fadeInRow 0.35s ease both;
-        }
-
-        .gif-container {
-          animation: fadeInGif 0.5s ease both;
-        }
-
-        .rank-gold {
-          background: linear-gradient(90deg, #FFF8E1 0%, #FFF3CD 100%);
-        }
-
-        .panel-card {
-          background: #FFFFFF;
-          border-radius: 10px;
-          box-shadow: 0 2px 12px rgba(10,31,68,0.08);
-          overflow: hidden;
-          display: flex;
-          flex-direction: column;
-        }
-
-        .panel-header {
-          border-top: 3px solid #FF6B35;
-          padding: 14px 20px 10px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          border-bottom: 1px solid #F0F0F0;
-        }
-
-        .live-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          background: rgba(255,107,53,0.12);
-          color: #FF6B35;
-          border: 1px solid rgba(255,107,53,0.3);
-          border-radius: 20px;
-          padding: 3px 12px;
-          font-size: 12px;
-          font-weight: 600;
-          letter-spacing: 0.05em;
-        }
-
-        .live-dot {
-          width: 7px;
-          height: 7px;
-          border-radius: 50%;
-          background: #FF6B35;
-          animation: pulse 1.5s infinite;
-        }
-
-        @keyframes pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.5; transform: scale(1.3); }
-        }
-
-        @media (max-width: 768px) {
-          .dashboard-split {
-            flex-direction: column !important;
-            height: auto !important;
-            overflow-y: auto !important;
-          }
-          .left-panel, .right-panel {
-            width: 100% !important;
-            height: 50vh !important;
-            min-height: 400px;
-          }
-        }
+        .lb-row { animation: fadeInRow 0.35s ease both; }
+        .gold-row { background: linear-gradient(90deg, #FFF8E1, #FFF3CD); }
       `}</style>
 
-      <nav
+      {/* TV viewport: full screen bg, centres the 16:9 canvas */}
+      <div
         style={{
+          position: "fixed",
+          inset: 0,
           background: "#0A1F44",
-          color: "#FFFFFF",
-          padding: "0 24px",
-          height: 56,
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
-          flexShrink: 0,
-          borderBottom: "3px solid #FF6B35",
+          justifyContent: "center",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        {/* 16:9 scaled canvas — absolutely positioned so the scaled size doesn't overflow layout */}
+        <div
+          style={{
+            position: "absolute",
+            left,
+            top,
+            width: TV_W,
+            height: TV_H,
+            transformOrigin: "top left",
+            transform: `scale(${scale})`,
+            overflow: "hidden",
+            background: "#F5F7FA",
+            fontFamily: "'Inter', sans-serif",
+          }}
+        >
+          {/* ── NAVBAR ── */}
           <div
             style={{
-              width: 32,
-              height: 32,
-              background: "#FF6B35",
-              borderRadius: 8,
+              background: "#0A1F44",
+              borderBottom: "4px solid #FF6B35",
+              height: NAV_H,
               display: "flex",
               alignItems: "center",
-              justifyContent: "center",
-              fontWeight: 700,
-              fontSize: 14,
-              color: "#fff",
+              justifyContent: "space-between",
+              padding: "0 28px",
             }}
           >
-            GC
-          </div>
-          <span style={{ fontWeight: 700, fontSize: 17, letterSpacing: "-0.01em" }}>
-            GoComet Dashboard
-          </span>
-        </div>
-        <div className="live-badge">
-          <span className="live-dot" />
-          LIVE
-        </div>
-      </nav>
-
-      <div
-        className="dashboard-split"
-        style={{
-          display: "flex",
-          flex: 1,
-          gap: 16,
-          padding: 16,
-          overflow: "hidden",
-        }}
-      >
-        <div
-          className="left-panel panel-card"
-          style={{ width: "60%", flex: "0 0 60%" }}
-        >
-          <div className="panel-header">
-            <span style={{ fontWeight: 700, fontSize: 15, color: "#0A1F44" }}>
-              Meetings Leaderboard
-            </span>
-            <span style={{ color: "#6B7280", fontSize: 12 }}>
-              Last updated: {formatTime(leaderboardUpdated)}
-            </span>
-          </div>
-
-          {top1 && (
-            <div
-              className="gif-container"
-              key={top1.name}
-              style={{
-                position: "relative",
-                background: "linear-gradient(135deg, #0A1F44 0%, #1a3a6e 100%)",
-                padding: "16px 20px",
-                display: "flex",
-                alignItems: "center",
-                gap: 16,
-                opacity: gifFadeIn ? 1 : 0,
-                transition: "opacity 0.5s ease",
-                minHeight: 100,
-                flexShrink: 0,
-              }}
-            >
-              {topChanged && <Confetti />}
-
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <div
                 style={{
-                  width: 80,
-                  height: 80,
+                  width: 40,
+                  height: 40,
+                  background: "#FF6B35",
                   borderRadius: 10,
-                  overflow: "hidden",
-                  border: "3px solid #FF6B35",
-                  flexShrink: 0,
-                  background: "#0A1F44",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontWeight: 800,
+                  fontSize: 16,
+                  color: "#fff",
+                  letterSpacing: "-0.02em",
                 }}
               >
-                {top1GifUrl ? (
-                  <img
-                    src={top1GifUrl}
-                    alt={top1.name}
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  />
+                GC
+              </div>
+              <span
+                style={{ fontWeight: 800, fontSize: 22, color: "#fff", letterSpacing: "-0.02em" }}
+              >
+                GoComet Dashboard
+              </span>
+            </div>
+
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                background: "rgba(255,107,53,0.14)",
+                color: "#FF6B35",
+                border: "1px solid rgba(255,107,53,0.35)",
+                borderRadius: 24,
+                padding: "5px 18px",
+                fontSize: 14,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+              }}
+            >
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: "#FF6B35",
+                  display: "inline-block",
+                  animation: "livePulse 1.5s infinite",
+                }}
+              />
+              LIVE
+            </div>
+          </div>
+
+          {/* ── BODY ── */}
+          <div
+            style={{
+              display: "flex",
+              gap: PADDING,
+              padding: PADDING,
+              height: TV_H - NAV_H,
+              background: "#F0F2F5",
+            }}
+          >
+            {/* ── LEFT PANEL: Leaderboard ── */}
+            <div
+              style={{
+                width: LEFT_W,
+                flexShrink: 0,
+                background: "#fff",
+                borderRadius: 12,
+                boxShadow: "0 2px 16px rgba(10,31,68,0.09)",
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              {/* panel header */}
+              <div
+                style={{
+                  borderTop: "3px solid #FF6B35",
+                  padding: "14px 24px 12px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  borderBottom: "1px solid #F0F0F0",
+                  flexShrink: 0,
+                }}
+              >
+                <span style={{ fontWeight: 800, fontSize: 18, color: "#0A1F44" }}>
+                  Meetings Leaderboard
+                </span>
+                <span style={{ color: "#9CA3AF", fontSize: 13 }}>
+                  Last updated: {formatTime(leaderboardUpdated)}
+                </span>
+              </div>
+
+              {/* #1 banner */}
+              {top1 && (
+                <div
+                  key={top1.name}
+                  style={{
+                    position: "relative",
+                    background: "linear-gradient(135deg, #0A1F44 0%, #1a3a6e 100%)",
+                    padding: "18px 24px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 20,
+                    height: TOP1_BANNER_H,
+                    flexShrink: 0,
+                    opacity: gifFadeIn ? 1 : 0,
+                    transition: "opacity 0.5s ease",
+                    animation: "fadeInGif 0.5s ease both",
+                  }}
+                >
+                  {topChanged && <Confetti />}
+
+                  <div
+                    style={{
+                      width: 100,
+                      height: 100,
+                      borderRadius: 12,
+                      overflow: "hidden",
+                      border: "3px solid #FF6B35",
+                      flexShrink: 0,
+                      background: "#0A1F44",
+                    }}
+                  >
+                    {top1GifUrl ? (
+                      <img
+                        src={top1GifUrl}
+                        alt={top1.name}
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          background: "linear-gradient(135deg,#FF6B35,#FF8C42)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 40,
+                        }}
+                      >
+                        🎉
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <div
+                      style={{
+                        color: "#FF6B35",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.12em",
+                        marginBottom: 6,
+                      }}
+                    >
+                      👑 #1 This Week
+                    </div>
+                    <div style={{ color: "#fff", fontSize: 26, fontWeight: 800, lineHeight: 1.2 }}>
+                      {top1.name}
+                    </div>
+                    <div style={{ color: "#FF6B35", fontSize: 18, fontWeight: 700, marginTop: 6 }}>
+                      {top1.meetings} meetings
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* empty state */}
+              {leaderboard.length === 0 && (
+                <div
+                  style={{
+                    flex: 1,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#9CA3AF",
+                    fontSize: 16,
+                    gap: 10,
+                  }}
+                >
+                  <span style={{ fontSize: 44 }}>📋</span>
+                  <span>
+                    Update{" "}
+                    <code style={{ color: "#1E90FF", fontSize: 13 }}>LEADERBOARD_CSV_URL</code>{" "}
+                    to load data
+                  </span>
+                </div>
+              )}
+
+              {/* table */}
+              {leaderboard.length > 0 && (
+                <div style={{ flex: 1, overflowY: "hidden", height: TABLE_H }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr
+                        style={{
+                          background: "#F9FAFB",
+                          borderBottom: "1px solid #E5E7EB",
+                          position: "sticky",
+                          top: 0,
+                        }}
+                      >
+                        <th
+                          style={{
+                            padding: "10px 24px",
+                            textAlign: "left",
+                            fontSize: 13,
+                            fontWeight: 700,
+                            color: "#9CA3AF",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.07em",
+                            width: 70,
+                          }}
+                        >
+                          Rank
+                        </th>
+                        <th
+                          style={{
+                            padding: "10px 24px",
+                            textAlign: "left",
+                            fontSize: 13,
+                            fontWeight: 700,
+                            color: "#9CA3AF",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.07em",
+                          }}
+                        >
+                          Name
+                        </th>
+                        <th
+                          style={{
+                            padding: "10px 24px",
+                            textAlign: "right",
+                            fontSize: 13,
+                            fontWeight: 700,
+                            color: "#9CA3AF",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.07em",
+                            width: 140,
+                          }}
+                        >
+                          Meetings
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {leaderboard.map((row, i) => (
+                        <tr
+                          key={row.name}
+                          className={`lb-row ${i === 0 ? "gold-row" : ""}`}
+                          style={{
+                            borderBottom: "1px solid #F3F4F6",
+                            animationDelay: `${i * 0.04}s`,
+                          }}
+                        >
+                          <td
+                            style={{
+                              padding: "13px 24px",
+                              fontSize: 15,
+                              fontWeight: 700,
+                              color: i === 0 ? "#D97706" : "#9CA3AF",
+                            }}
+                          >
+                            {i === 0 ? (
+                              <span style={{ display: "flex", alignItems: "center" }}>
+                                <span style={{ marginRight: 4 }}>👑</span>1
+                              </span>
+                            ) : (
+                              `#${i + 1}`
+                            )}
+                          </td>
+                          <td
+                            style={{
+                              padding: "13px 24px",
+                              fontSize: 15,
+                              fontWeight: i === 0 ? 700 : 500,
+                              color: i === 0 ? "#1A1A2E" : "#374151",
+                            }}
+                          >
+                            {row.name}
+                          </td>
+                          <td
+                            style={{
+                              padding: "13px 24px",
+                              textAlign: "right",
+                              fontSize: 16,
+                              fontWeight: 800,
+                              color: i === 0 ? "#FF6B35" : "#0A1F44",
+                            }}
+                          >
+                            {row.meetings.toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* footer */}
+              <div
+                style={{
+                  padding: "8px 24px",
+                  borderTop: "1px solid #F0F0F0",
+                  color: "#C4C9D4",
+                  fontSize: 12,
+                  textAlign: "right",
+                  flexShrink: 0,
+                }}
+              >
+                Auto-refreshes every 30s
+              </div>
+            </div>
+
+            {/* ── RIGHT PANEL: Pipeline ── */}
+            <div
+              style={{
+                flex: 1,
+                background: "#fff",
+                borderRadius: 12,
+                boxShadow: "0 2px 16px rgba(10,31,68,0.09)",
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              {/* panel header */}
+              <div
+                style={{
+                  borderTop: "3px solid #FF6B35",
+                  padding: "14px 24px 12px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  borderBottom: "1px solid #F0F0F0",
+                  flexShrink: 0,
+                }}
+              >
+                <span style={{ fontWeight: 800, fontSize: 18, color: "#0A1F44" }}>
+                  Pipeline Overview
+                </span>
+                <span style={{ color: "#9CA3AF", fontSize: 13 }}>
+                  Last updated: {formatTime(pipelineUpdated)}
+                </span>
+              </div>
+
+              {/* chart area */}
+              <div style={{ flex: 1, padding: "20px 24px 12px", minHeight: 0 }}>
+                {pipeline.length === 0 ? (
+                  <div
+                    style={{
+                      height: "100%",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#9CA3AF",
+                      fontSize: 16,
+                      gap: 10,
+                    }}
+                  >
+                    <span style={{ fontSize: 44 }}>📊</span>
+                    <span>
+                      Update{" "}
+                      <code style={{ color: "#1E90FF", fontSize: 13 }}>PIPELINE_CSV_URL</code>{" "}
+                      to load data
+                    </span>
+                  </div>
+                ) : chartJsLoaded ? (
+                  <PipelineChart data={pipeline} />
                 ) : (
                   <div
                     style={{
-                      width: "100%",
                       height: "100%",
-                      background: "linear-gradient(135deg, #FF6B35, #FF8C42)",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      fontSize: 28,
+                      color: "#9CA3AF",
+                      fontSize: 15,
                     }}
                   >
-                    🎉
+                    Loading chart…
                   </div>
                 )}
               </div>
 
-              <div>
-                <div
-                  style={{
-                    color: "#FF6B35",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.1em",
-                    marginBottom: 4,
-                  }}
-                >
-                  👑 #1 This Week
-                </div>
-                <div
-                  style={{
-                    color: "#FFFFFF",
-                    fontSize: 20,
-                    fontWeight: 700,
-                    lineHeight: 1.2,
-                  }}
-                >
-                  {top1.name}
-                </div>
-                <div
-                  style={{
-                    color: "#FF6B35",
-                    fontSize: 15,
-                    fontWeight: 600,
-                    marginTop: 4,
-                  }}
-                >
-                  {top1.meetings} meetings
-                </div>
-              </div>
-            </div>
-          )}
-
-          {leaderboard.length === 0 && (
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#6B7280",
-                fontSize: 14,
-                flexDirection: "column",
-                gap: 8,
-              }}
-            >
-              <div style={{ fontSize: 32 }}>📋</div>
-              <div>
-                Update <code style={{ fontSize: 12, color: "#1E90FF" }}>LEADERBOARD_CSV_URL</code> to load data
-              </div>
-            </div>
-          )}
-
-          {leaderboard.length > 0 && (
-            <div style={{ flex: 1, overflowY: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr
-                    style={{
-                      background: "#F9FAFB",
-                      borderBottom: "1px solid #E5E7EB",
-                    }}
-                  >
-                    <th
-                      style={{
-                        padding: "10px 20px",
-                        textAlign: "left",
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: "#6B7280",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.05em",
-                        width: 60,
-                      }}
-                    >
-                      Rank
-                    </th>
-                    <th
-                      style={{
-                        padding: "10px 20px",
-                        textAlign: "left",
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: "#6B7280",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.05em",
-                      }}
-                    >
-                      Name
-                    </th>
-                    <th
-                      style={{
-                        padding: "10px 20px",
-                        textAlign: "right",
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: "#6B7280",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.05em",
-                        width: 120,
-                      }}
-                    >
-                      Meetings
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {leaderboard.map((row, i) => (
-                    <tr
-                      key={row.name}
-                      className={`leaderboard-row ${i === 0 ? "rank-gold" : ""}`}
-                      style={{
-                        borderBottom: "1px solid #F3F4F6",
-                        animationDelay: `${i * 0.04}s`,
-                      }}
-                    >
-                      <td
-                        style={{
-                          padding: "12px 20px",
-                          fontSize: 14,
-                          fontWeight: 700,
-                          color: i === 0 ? "#D97706" : "#6B7280",
-                        }}
-                      >
-                        {i === 0 ? (
-                          <span style={{ display: "flex", alignItems: "center" }}>
-                            <CrownIcon />
-                            {i + 1}
-                          </span>
-                        ) : (
-                          `#${i + 1}`
-                        )}
-                      </td>
-                      <td
-                        style={{
-                          padding: "12px 20px",
-                          fontSize: 14,
-                          fontWeight: i === 0 ? 700 : 500,
-                          color: i === 0 ? "#1A1A2E" : "#374151",
-                        }}
-                      >
-                        {row.name}
-                      </td>
-                      <td
-                        style={{
-                          padding: "12px 20px",
-                          textAlign: "right",
-                          fontSize: 14,
-                          fontWeight: 700,
-                          color: i === 0 ? "#FF6B35" : "#0A1F44",
-                        }}
-                      >
-                        {row.meetings.toLocaleString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <div
-            style={{
-              padding: "8px 20px",
-              borderTop: "1px solid #F0F0F0",
-              color: "#9CA3AF",
-              fontSize: 11,
-              textAlign: "right",
-              flexShrink: 0,
-            }}
-          >
-            Auto-refreshes every 30s
-          </div>
-        </div>
-
-        <div
-          className="right-panel panel-card"
-          style={{ flex: 1 }}
-        >
-          <div className="panel-header">
-            <span style={{ fontWeight: 700, fontSize: 15, color: "#0A1F44" }}>
-              Pipeline Overview
-            </span>
-            <span style={{ color: "#6B7280", fontSize: 12 }}>
-              Last updated: {formatTime(pipelineUpdated)}
-            </span>
-          </div>
-
-          <div style={{ flex: 1, padding: 20, minHeight: 0 }}>
-            {pipeline.length === 0 ? (
+              {/* footer */}
               <div
                 style={{
-                  height: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#6B7280",
-                  fontSize: 14,
-                  flexDirection: "column",
-                  gap: 8,
+                  padding: "8px 24px",
+                  borderTop: "1px solid #F0F0F0",
+                  color: "#C4C9D4",
+                  fontSize: 12,
+                  textAlign: "right",
+                  flexShrink: 0,
                 }}
               >
-                <div style={{ fontSize: 32 }}>📊</div>
-                <div>
-                  Update <code style={{ fontSize: 12, color: "#1E90FF" }}>PIPELINE_CSV_URL</code> to load data
-                </div>
+                Auto-refreshes every 30s
               </div>
-            ) : chartJsLoaded ? (
-              <PipelineChart data={pipeline} />
-            ) : (
-              <div
-                style={{
-                  height: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#6B7280",
-                  fontSize: 14,
-                }}
-              >
-                Loading chart...
-              </div>
-            )}
-          </div>
-
-          <div
-            style={{
-              padding: "8px 20px",
-              borderTop: "1px solid #F0F0F0",
-              color: "#9CA3AF",
-              fontSize: 11,
-              textAlign: "right",
-              flexShrink: 0,
-            }}
-          >
-            Auto-refreshes every 30s
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
