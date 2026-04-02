@@ -543,6 +543,7 @@ export default function Dashboard() {
   const [chartJsLoaded, setChartJsLoaded] = useState(false);
   const [insights, setInsights] = useState<string[]>([]);
   const historyRef = useRef<InsightHistory>(loadHistory());
+  const maxMeetingsSumRef = useRef(0);
 
   const fetchLeaderboard = useCallback(async () => {
     try {
@@ -560,6 +561,12 @@ export default function Dashboard() {
         }))
         .filter((r) => r.name)
         .sort((a, b) => b.meetings - a.meetings);
+
+      // Reject stale Google Sheets CDN cache responses: meetings only ever increase,
+      // so a response whose total is lower than what we've already seen is old data.
+      const newSum = data.reduce((s, r) => s + r.meetings, 0);
+      if (newSum < maxMeetingsSumRef.current) return;
+      maxMeetingsSumRef.current = newSum;
 
       setLeaderboard((prev) => {
         const newTop = data[0];
