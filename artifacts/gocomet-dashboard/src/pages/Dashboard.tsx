@@ -21,6 +21,280 @@ interface PipelineRow {
   value: number;
 }
 
+// ── Insight history ──────────────────────────────────────────────────────────
+interface LeaderboardSnapshot {
+  ts: number;
+  ranks: Record<string, number>; // { "Surya": 14, "Jana": 9, ... }
+}
+interface InsightHistory {
+  sessionStart: LeaderboardSnapshot | null;
+  dayStart:     LeaderboardSnapshot | null;
+  weekStart:    LeaderboardSnapshot | null;
+  snapshots:    LeaderboardSnapshot[]; // in-memory ring buffer, max 96 entries
+}
+const HISTORY_KEY     = "gc_insight_history";
+const HISTORY_VERSION = 1;
+const MAX_MEM_SNAPS   = 96;
+const MAX_STORE_SNAPS = 12;
+
+function todayMidnight(): number {
+  const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime();
+}
+function thisMonday(): number {
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  const day = d.getDay();
+  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+  return d.getTime();
+}
+function loadHistory(): InsightHistory {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (!raw) throw new Error();
+    const p = JSON.parse(raw);
+    if (p.version !== HISTORY_VERSION) throw new Error();
+    const tm = todayMidnight(), mm = thisMonday();
+    return {
+      sessionStart: p.sessionStart ?? null,
+      dayStart:  p.dayStart  && p.dayStart.ts  >= tm ? p.dayStart  : null,
+      weekStart: p.weekStart && p.weekStart.ts >= mm ? p.weekStart : null,
+      snapshots: Array.isArray(p.snapshots) ? p.snapshots : [],
+    };
+  } catch { return { sessionStart: null, dayStart: null, weekStart: null, snapshots: [] }; }
+}
+function saveHistory(h: InsightHistory): void {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify({
+      version: HISTORY_VERSION,
+      sessionStart: h.sessionStart,
+      dayStart:     h.dayStart,
+      weekStart:    h.weekStart,
+      snapshots:    h.snapshots.slice(-MAX_STORE_SNAPS),
+    }));
+  } catch { /* quota – silently skip */ }
+}
+function recordSnapshot(data: LeaderboardRow[], h: InsightHistory): InsightHistory {
+  const snap: LeaderboardSnapshot = {
+    ts: Date.now(),
+    ranks: Object.fromEntries(data.map(r => [r.name, r.meetings])),
+  };
+  const snaps = [...h.snapshots, snap];
+  if (snaps.length > MAX_MEM_SNAPS) snaps.shift();
+  const tm = todayMidnight(), mm = thisMonday();
+  return {
+    sessionStart: h.sessionStart ?? snap,
+    dayStart:  (!h.dayStart  || h.dayStart.ts  < tm) ? snap : h.dayStart,
+    weekStart: (!h.weekStart || h.weekStart.ts < mm) ? snap : h.weekStart,
+    snapshots: snaps,
+  };
+}
+
+// ── Insight generators ───────────────────────────────────────────────────────
+function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
+
+function insightLeaderStreak(cur: LeaderboardRow[], h: InsightHistory): string | null {
+  if (!cur[0] || !h.weekStart) return null;
+  const leader = cur[0];
+  const weekTop = Object.entries(h.weekStart.ranks).sort((a, b) => b[1] - a[1])[0]?.[0];
+  if (weekTop !== leader.name) return null;
+  return pick([
+    `${leader.name} has held the #1 spot all week — ${leader.meetings} meetings and counting! 💪`,
+    `Nobody can stop ${leader.name} — leading since Monday with ${leader.meetings} meetings.`,
+    `${leader.name} set the pace on Monday and hasn't looked back. ${leader.meetings} meetings strong.`,
+  ]);
+}
+
+function insightMomentumUp(cur: LeaderboardRow[], h: InsightHistory): string | null {
+  if (cur.length < 2 || h.snapshots.length < 4) return null;
+  const recent = h.snapshots[Math.max(0, h.snapshots.length - 4)];
+  let bestGain = 0, bestName = "", bestMeetings = 0;
+  for (const row of cur.slice(1)) {
+    const gain = row.meetings - (recent.ranks[row.name] ?? row.meetings);
+    if (gain > bestGain) { bestGain = gain; bestName = row.name; bestMeetings = row.meetings; }
+  }
+  if (bestGain < 1) return null;
+  const s = bestGain === 1 ? "" : "s";
+  return pick([
+    `🔥 ${bestName} is on a roll — ${bestGain} new meeting${s} booked in the last few minutes!`,
+    `Watch out for ${bestName} — up ${bestGain} meeting${s} and climbing fast! 📈`,
+    `${bestName} is surging! ${bestGain} meeting${s} added recently — now at ${bestMeetings}.`,
+  ]);
+}
+
+function insightMomentumDown(cur: LeaderboardRow[], h: InsightHistory): string | null {
+  if (cur.length < 4 || !h.dayStart) return null;
+  const curRank: Record<string, number> = {};
+  cur.forEach((r, i) => { curRank[r.name] = i + 1; });
+  const dayTop = Object.entries(h.dayStart.ranks).sort((a, b) => b[1] - a[1]);
+  let worstName = "", worstDay = 0, worstNow = 0, worstDrop = 0;
+  for (let i = 0; i < Math.min(3, dayTop.length); i++) {
+    const [name] = dayTop[i];
+    const drop = (curRank[name] ?? 999) - (i + 1);
+    if (drop >= 2 && drop > worstDrop) {
+      worstDrop = drop; worstName = name; worstDay = i + 1; worstNow = curRank[name] ?? 999;
+    }
+  }
+  if (!worstName) return null;
+  return pick([
+    `${worstName} started the day at #${worstDay} but has slipped to #${worstNow}. Time to push! ⚡`,
+    `${worstName} has gone quiet after a strong start — was #${worstDay} this morning, now #${worstNow}.`,
+    `Can ${worstName} bounce back? Dropped from #${worstDay} to #${worstNow} today. 👀`,
+  ]);
+}
+
+function insightProximity(cur: LeaderboardRow[]): string | null {
+  if (cur.length < 3) return null;
+  const gap = cur[1].meetings - cur[2].meetings;
+  if (gap === 0) return pick([
+    `🤝 ${cur[1].name} and ${cur[2].name} are completely tied — every single meeting counts!`,
+    `Dead heat between ${cur[1].name} and ${cur[2].name} — equal meetings right now!`,
+  ]);
+  if (gap > 3) return null;
+  const s = gap === 1 ? "" : "s";
+  return pick([
+    `Only ${gap} meeting${s} separate #2 ${cur[1].name} and #3 ${cur[2].name} — the race is on! 🏁`,
+    `${cur[1].name} and ${cur[2].name} are neck-and-neck — just ${gap} meeting${s} apart. 🔥`,
+    `Battle for #2: ${cur[2].name} is just ${gap} meeting${s} behind ${cur[1].name}. Can they overtake?`,
+  ]);
+}
+
+function insightComeback(cur: LeaderboardRow[], h: InsightHistory): string | null {
+  if (cur.length < 3 || !h.dayStart || !h.sessionStart) return null;
+  const curRank: Record<string, number> = {};
+  cur.forEach((r, i) => { curRank[r.name] = i + 1; });
+  const dayRank: Record<string, number> = {};
+  Object.entries(h.dayStart.ranks).sort((a, b) => b[1] - a[1]).forEach(([n], i) => { dayRank[n] = i + 1; });
+  const sessRank: Record<string, number> = {};
+  Object.entries(h.sessionStart.ranks).sort((a, b) => b[1] - a[1]).forEach(([n], i) => { sessRank[n] = i + 1; });
+  for (const row of cur) {
+    const sr = sessRank[row.name], dr = dayRank[row.name], cr = curRank[row.name];
+    if (!sr || !dr) continue;
+    if (dr > sr + 1 && cr < dr - 1) {
+      const gained = dr - cr;
+      const s = gained === 1 ? "" : "s";
+      return pick([
+        `💪 ${row.name} is making a comeback — up ${gained} spot${s} since earlier today!`,
+        `${row.name} looked down-and-out this morning but is rallying back up the board! 📈`,
+        `Don't count out ${row.name} — they've clawed back ${gained} position${s} today.`,
+      ]);
+    }
+  }
+  return null;
+}
+
+function insightSessionGain(cur: LeaderboardRow[], h: InsightHistory): string | null {
+  if (!h.sessionStart || h.snapshots.length < 2) return null;
+  if (Date.now() - h.sessionStart.ts < 120000) return null;
+  let bestGain = 0, bestName = "", bestNow = 0;
+  for (const row of cur) {
+    const gain = row.meetings - (h.sessionStart.ranks[row.name] ?? 0);
+    if (gain > bestGain) { bestGain = gain; bestName = row.name; bestNow = row.meetings; }
+  }
+  if (bestGain < 1) return null;
+  const s = bestGain === 1 ? "" : "s";
+  return pick([
+    `📊 ${bestName} has booked ${bestGain} meeting${s} since this session started — now at ${bestNow}.`,
+    `${bestName} leads the session with ${bestGain} new meeting${s} added. Keep it up!`,
+    `Top performer this session: ${bestName} with ${bestGain} new meeting${s}! 🎯`,
+  ]);
+}
+
+function insightWeekClimber(cur: LeaderboardRow[], h: InsightHistory): string | null {
+  if (cur.length < 3 || !h.weekStart) return null;
+  const curRank: Record<string, number> = {};
+  cur.forEach((r, i) => { curRank[r.name] = i + 1; });
+  const weekTop = Object.entries(h.weekStart.ranks).sort((a, b) => b[1] - a[1]);
+  let bestName = "", bestClimb = 0, bestFrom = 0, bestTo = 0;
+  weekTop.forEach(([name], i) => {
+    const climb = (i + 1) - (curRank[name] ?? 999);
+    if (climb >= 2 && climb > bestClimb) {
+      bestClimb = climb; bestName = name; bestFrom = i + 1; bestTo = curRank[name] ?? 999;
+    }
+  });
+  if (!bestName) return null;
+  const s = bestClimb === 1 ? "" : "s";
+  return pick([
+    `📈 ${bestName} has climbed ${bestClimb} spot${s} since Monday — from #${bestFrom} to #${bestTo}!`,
+    `${bestName} is gaining momentum — up ${bestClimb} place${s} since the start of the week.`,
+    `Best week-on-week climber: ${bestName}, up ${bestClimb} spot${s} since Monday! 🚀`,
+  ]);
+}
+
+function insightFallback(cur: LeaderboardRow[]): string {
+  if (cur.length === 0) return "Loading leaderboard data...";
+  if (cur.length === 1) return `${cur[0].name} is leading with ${cur[0].meetings} meetings.`;
+  const chasing = cur.slice(1, 4).map(r => `${r.name} (${r.meetings})`).join(", ");
+  return pick([
+    `${cur[0].name} leads with ${cur[0].meetings} meetings. Chasing: ${chasing}.`,
+    `📊 Current standings: ${cur[0].name} on top with ${cur[0].meetings} meetings.`,
+    `🏆 ${cur[0].name} is out front with ${cur[0].meetings} meetings — who can catch them?`,
+  ]);
+}
+
+function generateInsights(cur: LeaderboardRow[], h: InsightHistory): string[] {
+  const add = (text: string | null, pri: number) => text ? [{ text, pri }] : [];
+  return [
+    ...add(insightMomentumUp(cur, h),    90),
+    ...add(insightLeaderStreak(cur, h),  80),
+    ...add(insightProximity(cur),        75),
+    ...add(insightComeback(cur, h),      70),
+    ...add(insightWeekClimber(cur, h),   65),
+    ...add(insightMomentumDown(cur, h),  60),
+    ...add(insightSessionGain(cur, h),   55),
+    ...add(insightFallback(cur),         10),
+  ].sort((a, b) => b.pri - a.pri).map(r => r.text);
+}
+
+// ── InsightTicker component ──────────────────────────────────────────────────
+function InsightTicker({ insights }: { insights: string[] }) {
+  const [idx, setIdx] = useState(0);
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    setIdx(0); setVisible(true);
+  }, [insights]);
+
+  useEffect(() => {
+    if (insights.length <= 1) return;
+    const t = setInterval(() => {
+      setVisible(false);
+      setTimeout(() => { setIdx(p => (p + 1) % insights.length); setVisible(true); }, 400);
+    }, 8000);
+    return () => clearInterval(t);
+  }, [insights.length]);
+
+  if (insights.length === 0) return null;
+  const text = insights[idx % insights.length];
+
+  return (
+    <div style={{
+      flexShrink: 0, height: 90,
+      background: "linear-gradient(135deg, #0A1F44 0%, #0f2d5e 100%)",
+      display: "flex", alignItems: "center", gap: 16, padding: "0 28px",
+      borderTop: "1px solid rgba(255,107,53,0.25)",
+    }}>
+      <div style={{ width: 4, height: 52, background: "#FF6B35", borderRadius: 2, flexShrink: 0 }} />
+      <div style={{ fontSize: 22, flexShrink: 0 }}>💡</div>
+      <div style={{
+        flex: 1, color: "#fff", fontSize: 18, fontWeight: 500, lineHeight: 1.45,
+        opacity: visible ? 1 : 0, transition: "opacity 0.4s ease",
+      }}>
+        {text}
+      </div>
+      {insights.length > 1 && (
+        <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+          {insights.map((_, i) => (
+            <div key={i} style={{
+              width: 6, height: 6, borderRadius: "50%",
+              background: i === idx % insights.length ? "#FF6B35" : "rgba(255,255,255,0.25)",
+              transition: "background 0.3s ease",
+            }} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function parseCSV(text: string): string[][] {
   const lines = text.trim().split("\n");
   return lines.map((line) => {
@@ -267,6 +541,8 @@ export default function Dashboard() {
   const [fullScreenGif, setFullScreenGif] = useState<string | null>(null);
   const [fullScreenGifFade, setFullScreenGifFade] = useState(false);
   const [chartJsLoaded, setChartJsLoaded] = useState(false);
+  const [insights, setInsights] = useState<string[]>([]);
+  const historyRef = useRef<InsightHistory>(loadHistory());
 
   const fetchLeaderboard = useCallback(async () => {
     try {
@@ -301,6 +577,10 @@ export default function Dashboard() {
         }
         return data;
       });
+      const updated = recordSnapshot(data, historyRef.current);
+      historyRef.current = updated;
+      saveHistory(updated);
+      setInsights(generateInsights(data, updated));
       setLeaderboardUpdated(new Date());
     } catch (_e) {}
   }, []);
@@ -389,7 +669,8 @@ export default function Dashboard() {
   const TOP1_BANNER_H = top1 ? 192 : 0;
   const PANEL_HEADER_H = 60;
   const PANEL_FOOTER_H = 36;
-  const TABLE_H = CONTENT_H - TOP1_BANNER_H - PANEL_HEADER_H - PANEL_FOOTER_H;
+  const INSIGHTS_H = 90;
+  const TABLE_H = CONTENT_H - TOP1_BANNER_H - PANEL_HEADER_H - PANEL_FOOTER_H - INSIGHTS_H;
 
   return (
     <>
@@ -804,6 +1085,9 @@ export default function Dashboard() {
                   </table>
                 </div>
               )}
+
+              {/* insight ticker */}
+              <InsightTicker insights={insights} />
 
               {/* footer */}
               <div
