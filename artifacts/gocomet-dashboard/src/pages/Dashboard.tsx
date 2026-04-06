@@ -806,7 +806,7 @@ export default function Dashboard() {
               <span
                 style={{ fontWeight: 800, fontSize: 22, color: "#fff", letterSpacing: "-0.02em" }}
               >
-                GoComet BDR Dashboard
+                GoComet AE Dashboard
               </span>
             </div>
 
@@ -1140,7 +1140,7 @@ export default function Dashboard() {
                 }}
               >
                 <span style={{ fontWeight: 800, fontSize: 18, color: "#0A1F44" }}>
-                  Pipeline Overview
+                  Pipeline April 2026
                 </span>
                 <span style={{ color: "#9CA3AF", fontSize: 13 }}>
                   Last updated: {formatTime(pipelineUpdated)}
