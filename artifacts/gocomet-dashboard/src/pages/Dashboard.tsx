@@ -24,7 +24,7 @@ interface PipelineRow {
 // ── Insight history ──────────────────────────────────────────────────────────
 interface LeaderboardSnapshot {
   ts: number;
-  ranks: Record<string, number>; // { "Surya": 14, "Jana": 9, ... }
+  ranks: Record<string, number>;
 }
 interface InsightHistory {
   sessionStart: LeaderboardSnapshot | null;
@@ -96,11 +96,11 @@ function insightLeaderStreak(cur: LeaderboardRow[], h: InsightHistory): string |
   const leader = cur[0];
   const weekTop = Object.entries(h.weekStart.ranks).sort((a, b) => b[1] - a[1])[0]?.[0];
   if (weekTop !== leader.name) return null;
-  const formattedValue = (leader.pipeline / 1000).toFixed(0);
+  const formattedValue = leader.pipeline.toLocaleString();
   return pick([
-    `${leader.name} has held the #1 spot all week — $${formattedValue}K in pipeline and counting! 💪`,
-    `Nobody can stop ${leader.name} — leading since Monday with $${formattedValue}K in pipeline.`,
-    `${leader.name} set the pace on Monday and hasn't looked back. $${formattedValue}K strong.`,
+    `${leader.name} has held the #1 spot all week — $${formattedValue} in pipeline and counting! 💪`,
+    `Nobody can stop ${leader.name} — leading since Monday with $${formattedValue} in pipeline.`,
+    `${leader.name} set the pace on Monday and hasn't looked back. $${formattedValue} strong.`,
   ]);
 }
 
@@ -113,12 +113,12 @@ function insightMomentumUp(cur: LeaderboardRow[], h: InsightHistory): string | n
     if (gain > bestGain) { bestGain = gain; bestName = row.name; bestPipeline = row.pipeline; }
   }
   if (bestGain < 1000) return null;
-  const gainK = (bestGain / 1000).toFixed(0);
-  const pipelineK = (bestPipeline / 1000).toFixed(0);
+  const gainStr = bestGain.toLocaleString();
+  const pipelineStr = bestPipeline.toLocaleString();
   return pick([
-    `🔥 ${bestName} is on a roll — $${gainK}K in new pipeline added in the last few minutes!`,
-    `Watch out for ${bestName} — up $${gainK}K and climbing fast! 📈`,
-    `${bestName} is surging! $${gainK}K added recently — now at $${pipelineK}K.`,
+    `🔥 ${bestName} is on a roll — $${gainStr} in new pipeline added in the last few minutes!`,
+    `Watch out for ${bestName} — up $${gainStr} and climbing fast! 📈`,
+    `${bestName} is surging! $${gainStr} added recently — now at $${pipelineStr}.`,
   ]);
 }
 
@@ -146,16 +146,16 @@ function insightMomentumDown(cur: LeaderboardRow[], h: InsightHistory): string |
 function insightProximity(cur: LeaderboardRow[]): string | null {
   if (cur.length < 3) return null;
   const gap = cur[1].pipeline - cur[2].pipeline;
-  const gapK = (gap / 1000).toFixed(0);
+  const gapStr = gap.toLocaleString();
   if (gap === 0) return pick([
     `🤝 ${cur[1].name} and ${cur[2].name} are completely tied — every dollar counts!`,
     `Dead heat between ${cur[1].name} and ${cur[2].name} — equal pipeline right now!`,
   ]);
   if (gap > 3000) return null;
   return pick([
-    `Only $${gapK}K separate #2 ${cur[1].name} and #3 ${cur[2].name} — the race is on! 🏁`,
-    `${cur[1].name} and ${cur[2].name} are neck-and-neck — just $${gapK}K apart. 🔥`,
-    `Battle for #2: ${cur[2].name} is just $${gapK}K behind ${cur[1].name}. Can they overtake?`,
+    `Only $${gapStr} separate #2 ${cur[1].name} and #3 ${cur[2].name} — the race is on! 🏁`,
+    `${cur[1].name} and ${cur[2].name} are neck-and-neck — just $${gapStr} apart. 🔥`,
+    `Battle for #2: ${cur[2].name} is just $${gapStr} behind ${cur[1].name}. Can they overtake?`,
   ]);
 }
 
@@ -192,12 +192,12 @@ function insightSessionGain(cur: LeaderboardRow[], h: InsightHistory): string | 
     if (gain > bestGain) { bestGain = gain; bestName = row.name; bestNow = row.pipeline; }
   }
   if (bestGain < 1000) return null;
-  const gainK = (bestGain / 1000).toFixed(0);
-  const nowK = (bestNow / 1000).toFixed(0);
+  const gainStr = bestGain.toLocaleString();
+  const nowStr = bestNow.toLocaleString();
   return pick([
-    `📊 ${bestName} has added $${gainK}K to pipeline since this session started — now at $${nowK}K.`,
-    `${bestName} leads the session with $${gainK}K in new pipeline added. Keep it up!`,
-    `Top performer this session: ${bestName} with $${gainK}K in new pipeline! 🎯`,
+    `📊 ${bestName} has added $${gainStr} to pipeline since this session started — now at $${nowStr}.`,
+    `${bestName} leads the session with $${gainStr} in new pipeline added. Keep it up!`,
+    `Top performer this session: ${bestName} with $${gainStr} in new pipeline! 🎯`,
   ]);
 }
 
@@ -224,13 +224,13 @@ function insightWeekClimber(cur: LeaderboardRow[], h: InsightHistory): string | 
 
 function insightFallback(cur: LeaderboardRow[]): string {
   if (cur.length === 0) return "Loading leaderboard data...";
-  const topK = (cur[0].pipeline / 1000).toFixed(0);
-  if (cur.length === 1) return `${cur[0].name} is leading with $${topK}K in pipeline.`;
-  const chasing = cur.slice(1, 4).map(r => `${r.name} ($${(r.pipeline / 1000).toFixed(0)}K)`).join(", ");
+  const topStr = cur[0].pipeline.toLocaleString();
+  if (cur.length === 1) return `${cur[0].name} is leading with $${topStr} in pipeline.`;
+  const chasing = cur.slice(1, 4).map(r => `${r.name} ($${r.pipeline.toLocaleString()})`).join(", ");
   return pick([
-    `${cur[0].name} leads with $${topK}K. Chasing: ${chasing}.`,
-    `📊 Current standings: ${cur[0].name} on top with $${topK}K in pipeline.`,
-    `🏆 ${cur[0].name} is out front with $${topK}K — who can catch them?`,
+    `${cur[0].name} leads with $${topStr}. Chasing: ${chasing}.`,
+    `📊 Current standings: ${cur[0].name} on top with $${topStr} in pipeline.`,
+    `🏆 ${cur[0].name} is out front with $${topStr} — who can catch them?`,
   ]);
 }
 
@@ -955,7 +955,7 @@ export default function Dashboard() {
                       {top1.name}
                     </div>
                     <div style={{ color: "#FF6B35", fontSize: 26, fontWeight: 700, marginTop: 8 }}>
-                      ${(top1.pipeline / 1000).toFixed(0)}K in pipeline
+                      ${top1.pipeline.toLocaleString()} in pipeline
                     </div>
                   </div>
                 </div>
@@ -1085,7 +1085,7 @@ export default function Dashboard() {
                               color: i === 0 ? "#FF6B35" : "#0A1F44",
                             }}
                           >
-                            ${(row.pipeline / 1000).toFixed(0)}K
+                            ${row.pipeline.toLocaleString()}
                           </td>
                         </tr>
                       ))}
@@ -1207,3 +1207,7 @@ export default function Dashboard() {
     </>
   );
 }
+
+
+
+
