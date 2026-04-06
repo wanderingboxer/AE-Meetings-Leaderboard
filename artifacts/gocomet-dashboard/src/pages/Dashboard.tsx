@@ -299,6 +299,15 @@ function InsightTicker({ insights }: { insights: string[] }) {
   );
 }
 
+function parseNumber(value: string): number {
+  const normalized = value
+    .trim()
+    .replace(/[,\s]/g, "")
+    .replace(/[^0-9.-]+/g, "");
+  const parsed = parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function parseCSV(text: string): string[][] {
   const lines = text.trim().split("\n");
   return lines.map((line) => {
@@ -557,7 +566,7 @@ export default function Dashboard() {
         .slice(1)
         .map((row) => ({
           name: row[0] || "",
-          pipeline: parseFloat(row[1] || "0") || 0,
+          pipeline: parseNumber(row[1] || "0"),
           gifUrl: row[2] || "",
         }))
         .filter((r) => r.name)
@@ -604,7 +613,7 @@ export default function Dashboard() {
         .slice(1)
         .map((row) => ({
           label: row[0] || "",
-          value: parseFloat(row[1] || "0") || 0,
+          value: parseNumber(row[1] || "0"),
         }))
         .filter((r) => r.label);
       setPipeline(data);
@@ -1207,7 +1216,3 @@ export default function Dashboard() {
     </>
   );
 }
-
-
-
-
