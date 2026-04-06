@@ -548,7 +548,7 @@ export default function Dashboard() {
 
   const fetchLeaderboard = useCallback(async () => {
     try {
-      const nocacheUrl = `${PIPELINE_CSV_URL}&t=${Date.now()}`;
+      const nocacheUrl = `${LEADERBOARD_CSV_URL}&t=${Date.now()}`;
       const res = await fetch(nocacheUrl, { cache: "no-store" });
       const text = await res.text();
       const rows = parseCSV(text);
