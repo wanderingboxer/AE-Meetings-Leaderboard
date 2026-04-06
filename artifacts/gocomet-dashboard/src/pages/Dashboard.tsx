@@ -33,7 +33,7 @@ interface InsightHistory {
   snapshots:    LeaderboardSnapshot[]; // in-memory ring buffer, max 96 entries
 }
 const HISTORY_KEY     = "gc_insight_history";
-const HISTORY_VERSION = 1;
+const HISTORY_VERSION = 2;
 const MAX_MEM_SNAPS   = 96;
 const MAX_STORE_SNAPS = 12;
 
