@@ -12,7 +12,7 @@ const TV_H = 1080;
 
 interface LeaderboardRow {
   name: string;
-  meetings: number;
+  pipeline: number;
   gifUrl: string;
 }
 
@@ -75,7 +75,7 @@ function saveHistory(h: InsightHistory): void {
 function recordSnapshot(data: LeaderboardRow[], h: InsightHistory): InsightHistory {
   const snap: LeaderboardSnapshot = {
     ts: Date.now(),
-    ranks: Object.fromEntries(data.map(r => [r.name, r.meetings])),
+    ranks: Object.fromEntries(data.map(r => [r.name, r.pipeline])),
   };
   const snaps = [...h.snapshots, snap];
   if (snaps.length > MAX_MEM_SNAPS) snaps.shift();
@@ -96,27 +96,29 @@ function insightLeaderStreak(cur: LeaderboardRow[], h: InsightHistory): string |
   const leader = cur[0];
   const weekTop = Object.entries(h.weekStart.ranks).sort((a, b) => b[1] - a[1])[0]?.[0];
   if (weekTop !== leader.name) return null;
+  const formattedValue = (leader.pipeline / 1000).toFixed(0);
   return pick([
-    `${leader.name} has held the #1 spot all week — ${leader.meetings} meetings and counting! 💪`,
-    `Nobody can stop ${leader.name} — leading since Monday with ${leader.meetings} meetings.`,
-    `${leader.name} set the pace on Monday and hasn't looked back. ${leader.meetings} meetings strong.`,
+    `${leader.name} has held the #1 spot all week — $${formattedValue}K in pipeline and counting! 💪`,
+    `Nobody can stop ${leader.name} — leading since Monday with $${formattedValue}K in pipeline.`,
+    `${leader.name} set the pace on Monday and hasn't looked back. $${formattedValue}K strong.`,
   ]);
 }
 
 function insightMomentumUp(cur: LeaderboardRow[], h: InsightHistory): string | null {
   if (cur.length < 2 || h.snapshots.length < 4) return null;
   const recent = h.snapshots[Math.max(0, h.snapshots.length - 4)];
-  let bestGain = 0, bestName = "", bestMeetings = 0;
+  let bestGain = 0, bestName = "", bestPipeline = 0;
   for (const row of cur.slice(1)) {
-    const gain = row.meetings - (recent.ranks[row.name] ?? row.meetings);
-    if (gain > bestGain) { bestGain = gain; bestName = row.name; bestMeetings = row.meetings; }
+    const gain = row.pipeline - (recent.ranks[row.name] ?? row.pipeline);
+    if (gain > bestGain) { bestGain = gain; bestName = row.name; bestPipeline = row.pipeline; }
   }
-  if (bestGain < 1) return null;
-  const s = bestGain === 1 ? "" : "s";
+  if (bestGain < 1000) return null;
+  const gainK = (bestGain / 1000).toFixed(0);
+  const pipelineK = (bestPipeline / 1000).toFixed(0);
   return pick([
-    `🔥 ${bestName} is on a roll — ${bestGain} new meeting${s} booked in the last few minutes!`,
-    `Watch out for ${bestName} — up ${bestGain} meeting${s} and climbing fast! 📈`,
-    `${bestName} is surging! ${bestGain} meeting${s} added recently — now at ${bestMeetings}.`,
+    `🔥 ${bestName} is on a roll — $${gainK}K in new pipeline added in the last few minutes!`,
+    `Watch out for ${bestName} — up $${gainK}K and climbing fast! 📈`,
+    `${bestName} is surging! $${gainK}K added recently — now at $${pipelineK}K.`,
   ]);
 }
 
@@ -143,17 +145,17 @@ function insightMomentumDown(cur: LeaderboardRow[], h: InsightHistory): string |
 
 function insightProximity(cur: LeaderboardRow[]): string | null {
   if (cur.length < 3) return null;
-  const gap = cur[1].meetings - cur[2].meetings;
+  const gap = cur[1].pipeline - cur[2].pipeline;
+  const gapK = (gap / 1000).toFixed(0);
   if (gap === 0) return pick([
-    `🤝 ${cur[1].name} and ${cur[2].name} are completely tied — every single meeting counts!`,
-    `Dead heat between ${cur[1].name} and ${cur[2].name} — equal meetings right now!`,
+    `🤝 ${cur[1].name} and ${cur[2].name} are completely tied — every dollar counts!`,
+    `Dead heat between ${cur[1].name} and ${cur[2].name} — equal pipeline right now!`,
   ]);
-  if (gap > 3) return null;
-  const s = gap === 1 ? "" : "s";
+  if (gap > 3000) return null;
   return pick([
-    `Only ${gap} meeting${s} separate #2 ${cur[1].name} and #3 ${cur[2].name} — the race is on! 🏁`,
-    `${cur[1].name} and ${cur[2].name} are neck-and-neck — just ${gap} meeting${s} apart. 🔥`,
-    `Battle for #2: ${cur[2].name} is just ${gap} meeting${s} behind ${cur[1].name}. Can they overtake?`,
+    `Only $${gapK}K separate #2 ${cur[1].name} and #3 ${cur[2].name} — the race is on! 🏁`,
+    `${cur[1].name} and ${cur[2].name} are neck-and-neck — just $${gapK}K apart. 🔥`,
+    `Battle for #2: ${cur[2].name} is just $${gapK}K behind ${cur[1].name}. Can they overtake?`,
   ]);
 }
 
@@ -186,15 +188,16 @@ function insightSessionGain(cur: LeaderboardRow[], h: InsightHistory): string | 
   if (Date.now() - h.sessionStart.ts < 120000) return null;
   let bestGain = 0, bestName = "", bestNow = 0;
   for (const row of cur) {
-    const gain = row.meetings - (h.sessionStart.ranks[row.name] ?? 0);
-    if (gain > bestGain) { bestGain = gain; bestName = row.name; bestNow = row.meetings; }
+    const gain = row.pipeline - (h.sessionStart.ranks[row.name] ?? 0);
+    if (gain > bestGain) { bestGain = gain; bestName = row.name; bestNow = row.pipeline; }
   }
-  if (bestGain < 1) return null;
-  const s = bestGain === 1 ? "" : "s";
+  if (bestGain < 1000) return null;
+  const gainK = (bestGain / 1000).toFixed(0);
+  const nowK = (bestNow / 1000).toFixed(0);
   return pick([
-    `📊 ${bestName} has booked ${bestGain} meeting${s} since this session started — now at ${bestNow}.`,
-    `${bestName} leads the session with ${bestGain} new meeting${s} added. Keep it up!`,
-    `Top performer this session: ${bestName} with ${bestGain} new meeting${s}! 🎯`,
+    `📊 ${bestName} has added $${gainK}K to pipeline since this session started — now at $${nowK}K.`,
+    `${bestName} leads the session with $${gainK}K in new pipeline added. Keep it up!`,
+    `Top performer this session: ${bestName} with $${gainK}K in new pipeline! 🎯`,
   ]);
 }
 
@@ -221,12 +224,13 @@ function insightWeekClimber(cur: LeaderboardRow[], h: InsightHistory): string | 
 
 function insightFallback(cur: LeaderboardRow[]): string {
   if (cur.length === 0) return "Loading leaderboard data...";
-  if (cur.length === 1) return `${cur[0].name} is leading with ${cur[0].meetings} meetings.`;
-  const chasing = cur.slice(1, 4).map(r => `${r.name} (${r.meetings})`).join(", ");
+  const topK = (cur[0].pipeline / 1000).toFixed(0);
+  if (cur.length === 1) return `${cur[0].name} is leading with $${topK}K in pipeline.`;
+  const chasing = cur.slice(1, 4).map(r => `${r.name} ($${(r.pipeline / 1000).toFixed(0)}K)`).join(", ");
   return pick([
-    `${cur[0].name} leads with ${cur[0].meetings} meetings. Chasing: ${chasing}.`,
-    `📊 Current standings: ${cur[0].name} on top with ${cur[0].meetings} meetings.`,
-    `🏆 ${cur[0].name} is out front with ${cur[0].meetings} meetings — who can catch them?`,
+    `${cur[0].name} leads with $${topK}K. Chasing: ${chasing}.`,
+    `📊 Current standings: ${cur[0].name} on top with $${topK}K in pipeline.`,
+    `🏆 ${cur[0].name} is out front with $${topK}K — who can catch them?`,
   ]);
 }
 
@@ -433,7 +437,7 @@ function PipelineChart({ data }: { data: PipelineRow[] }) {
               size: 16,
               weight: "700",
             },
-           formatter: (value: number) => value.toLocaleString(),
+            formatter: (value: number) => value.toLocaleString(),
           },
         },
         scales: {
@@ -544,7 +548,7 @@ export default function Dashboard() {
 
   const fetchLeaderboard = useCallback(async () => {
     try {
-      const nocacheUrl = `${LEADERBOARD_CSV_URL}&t=${Date.now()}`;
+      const nocacheUrl = `${PIPELINE_CSV_URL}&t=${Date.now()}`;
       const res = await fetch(nocacheUrl, { cache: "no-store" });
       const text = await res.text();
       const rows = parseCSV(text);
@@ -553,15 +557,15 @@ export default function Dashboard() {
         .slice(1)
         .map((row) => ({
           name: row[0] || "",
-          meetings: parseInt(row[1] || "0", 10) || 0,
+          pipeline: parseFloat(row[1] || "0") || 0,
           gifUrl: row[2] || "",
         }))
         .filter((r) => r.name)
-        .sort((a, b) => b.meetings - a.meetings);
+        .sort((a, b) => b.pipeline - a.pipeline);
 
-      // Reject stale Google Sheets CDN cache responses: meetings only ever increase,
+      // Reject stale Google Sheets CDN cache responses: pipeline values only ever increase,
       // so a response whose total is lower than what we've already seen is old data.
-      const newSum = data.reduce((s, r) => s + r.meetings, 0);
+      const newSum = data.reduce((s, r) => s + r.pipeline, 0);
       if (newSum < maxMeetingsSumRef.current) return;
       maxMeetingsSumRef.current = newSum;
 
@@ -872,7 +876,7 @@ export default function Dashboard() {
                 }}
               >
                 <span style={{ fontWeight: 800, fontSize: 26, color: "#0A1F44" }}>
-                  Meetings Leaderboard
+                  Pipeline Leaderboard
                 </span>
                 <span style={{ color: "#9CA3AF", fontSize: 16 }}>
                   Last updated: {formatTime(leaderboardUpdated)}
@@ -951,7 +955,7 @@ export default function Dashboard() {
                       {top1.name}
                     </div>
                     <div style={{ color: "#FF6B35", fontSize: 26, fontWeight: 700, marginTop: 8 }}>
-                      {top1.meetings} meetings
+                      ${(top1.pipeline / 1000).toFixed(0)}K in pipeline
                     </div>
                   </div>
                 </div>
@@ -974,7 +978,7 @@ export default function Dashboard() {
                   <span style={{ fontSize: 44 }}>📋</span>
                   <span>
                     Update{" "}
-                    <code style={{ color: "#1E90FF", fontSize: 13 }}>LEADERBOARD_CSV_URL</code>{" "}
+                    <code style={{ color: "#1E90FF", fontSize: 13 }}>PIPELINE_CSV_URL</code>{" "}
                     to load data
                   </span>
                 </div>
@@ -1032,7 +1036,7 @@ export default function Dashboard() {
                             width: 180,
                           }}
                         >
-                          Meetings
+                          Pipeline
                         </th>
                       </tr>
                     </thead>
@@ -1081,7 +1085,7 @@ export default function Dashboard() {
                               color: i === 0 ? "#FF6B35" : "#0A1F44",
                             }}
                           >
-                            {row.meetings.toLocaleString()}
+                            ${(row.pipeline / 1000).toFixed(0)}K
                           </td>
                         </tr>
                       ))}
