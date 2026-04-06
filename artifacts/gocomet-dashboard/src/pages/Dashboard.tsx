@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 
 const LEADERBOARD_CSV_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTaQ3nxjerGzxpDVYGgyr3VJq6iqMTvP1Ox0tAHCCryLxMFNG-m_AU2r3zZD_Zxvp-qXwzXBV7RugTS/pub?gid=1575208426&single=true&output=csv";
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTnsYv4XqtFjl9Wtue1LgD1df5_eNsMu_SQU[…]EIzTf1hv6LG-1sCVUn5/pub?gid=1575208426&single=true&output=csv";
 const PIPELINE_CSV_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTaQ3nxjerGzxpDVYGgyr3VJq6iqMTvP1Ox0tAHCCryLxMFNG-m_AU2r3zZD_Zxvp-qXwzXBV7RugTS/pub?gid=0&single=true&output=csv";
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTnsYv4XqtFjl9Wtue1LgD1df5_eNsMu_SQU[…]9QLxIZRy4EIzTf1hv6LG-1sCVUn5/pub?gid=0&single=true&output=csv";
 
 const REFRESH_INTERVAL = 30000;
 
