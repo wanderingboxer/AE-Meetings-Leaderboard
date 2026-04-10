@@ -29,21 +29,20 @@ interface LeaderboardSnapshot {
 interface InsightHistory {
   sessionStart: LeaderboardSnapshot | null;
   dayStart:     LeaderboardSnapshot | null;
-  weekStart:    LeaderboardSnapshot | null;
+  monthStart:   LeaderboardSnapshot | null;
   snapshots:    LeaderboardSnapshot[]; // in-memory ring buffer, max 96 entries
 }
 const HISTORY_KEY     = "gc_insight_history";
-const HISTORY_VERSION = 2;
+const HISTORY_VERSION = 3;
 const MAX_MEM_SNAPS   = 96;
 const MAX_STORE_SNAPS = 12;
 
 function todayMidnight(): number {
   const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime();
 }
-function thisMonday(): number {
+function thisMonthStart(): number {
   const d = new Date(); d.setHours(0, 0, 0, 0);
-  const day = d.getDay();
-  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+  d.setDate(1);
   return d.getTime();
 }
 function loadHistory(): InsightHistory {
@@ -52,14 +51,14 @@ function loadHistory(): InsightHistory {
     if (!raw) throw new Error();
     const p = JSON.parse(raw);
     if (p.version !== HISTORY_VERSION) throw new Error();
-    const tm = todayMidnight(), mm = thisMonday();
+    const tm = todayMidnight(), mm = thisMonthStart();
     return {
       sessionStart: p.sessionStart ?? null,
-      dayStart:  p.dayStart  && p.dayStart.ts  >= tm ? p.dayStart  : null,
-      weekStart: p.weekStart && p.weekStart.ts >= mm ? p.weekStart : null,
+      dayStart:   p.dayStart   && p.dayStart.ts   >= tm ? p.dayStart   : null,
+      monthStart: p.monthStart && p.monthStart.ts >= mm ? p.monthStart : null,
       snapshots: Array.isArray(p.snapshots) ? p.snapshots : [],
     };
-  } catch { return { sessionStart: null, dayStart: null, weekStart: null, snapshots: [] }; }
+  } catch { return { sessionStart: null, dayStart: null, monthStart: null, snapshots: [] }; }
 }
 function saveHistory(h: InsightHistory): void {
   try {
@@ -67,7 +66,7 @@ function saveHistory(h: InsightHistory): void {
       version: HISTORY_VERSION,
       sessionStart: h.sessionStart,
       dayStart:     h.dayStart,
-      weekStart:    h.weekStart,
+      monthStart:   h.monthStart,
       snapshots:    h.snapshots.slice(-MAX_STORE_SNAPS),
     }));
   } catch { /* quota – silently skip */ }
@@ -79,11 +78,11 @@ function recordSnapshot(data: LeaderboardRow[], h: InsightHistory): InsightHisto
   };
   const snaps = [...h.snapshots, snap];
   if (snaps.length > MAX_MEM_SNAPS) snaps.shift();
-  const tm = todayMidnight(), mm = thisMonday();
+  const tm = todayMidnight(), mm = thisMonthStart();
   return {
     sessionStart: h.sessionStart ?? snap,
-    dayStart:  (!h.dayStart  || h.dayStart.ts  < tm) ? snap : h.dayStart,
-    weekStart: (!h.weekStart || h.weekStart.ts < mm) ? snap : h.weekStart,
+    dayStart:   (!h.dayStart   || h.dayStart.ts   < tm) ? snap : h.dayStart,
+    monthStart: (!h.monthStart || h.monthStart.ts < mm) ? snap : h.monthStart,
     snapshots: snaps,
   };
 }
@@ -92,15 +91,15 @@ function recordSnapshot(data: LeaderboardRow[], h: InsightHistory): InsightHisto
 function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
 
 function insightLeaderStreak(cur: LeaderboardRow[], h: InsightHistory): string | null {
-  if (!cur[0] || !h.weekStart) return null;
+  if (!cur[0] || !h.monthStart) return null;
   const leader = cur[0];
-  const weekTop = Object.entries(h.weekStart.ranks).sort((a, b) => b[1] - a[1])[0]?.[0];
-  if (weekTop !== leader.name) return null;
+  const monthTop = Object.entries(h.monthStart.ranks).sort((a, b) => b[1] - a[1])[0]?.[0];
+  if (monthTop !== leader.name) return null;
   const formattedValue = leader.pipeline.toLocaleString();
   return pick([
-    `${leader.name} has held the #1 spot all week — $${formattedValue} in pipeline and counting! 💪`,
-    `Nobody can stop ${leader.name} — leading since Monday with $${formattedValue} in pipeline.`,
-    `${leader.name} set the pace on Monday and hasn't looked back. $${formattedValue} strong.`,
+    `${leader.name} has held the #1 spot all month — $${formattedValue} in pipeline and counting! 💪`,
+    `Nobody can stop ${leader.name} — leading since the 1st with $${formattedValue} in pipeline.`,
+    `${leader.name} set the pace on the 1st and hasn't looked back. $${formattedValue} strong.`,
   ]);
 }
 
@@ -201,13 +200,13 @@ function insightSessionGain(cur: LeaderboardRow[], h: InsightHistory): string | 
   ]);
 }
 
-function insightWeekClimber(cur: LeaderboardRow[], h: InsightHistory): string | null {
-  if (cur.length < 3 || !h.weekStart) return null;
+function insightMonthClimber(cur: LeaderboardRow[], h: InsightHistory): string | null {
+  if (cur.length < 3 || !h.monthStart) return null;
   const curRank: Record<string, number> = {};
   cur.forEach((r, i) => { curRank[r.name] = i + 1; });
-  const weekTop = Object.entries(h.weekStart.ranks).sort((a, b) => b[1] - a[1]);
+  const monthTop = Object.entries(h.monthStart.ranks).sort((a, b) => b[1] - a[1]);
   let bestName = "", bestClimb = 0, bestFrom = 0, bestTo = 0;
-  weekTop.forEach(([name], i) => {
+  monthTop.forEach(([name], i) => {
     const climb = (i + 1) - (curRank[name] ?? 999);
     if (climb >= 2 && climb > bestClimb) {
       bestClimb = climb; bestName = name; bestFrom = i + 1; bestTo = curRank[name] ?? 999;
@@ -216,9 +215,9 @@ function insightWeekClimber(cur: LeaderboardRow[], h: InsightHistory): string | 
   if (!bestName) return null;
   const s = bestClimb === 1 ? "" : "s";
   return pick([
-    `📈 ${bestName} has climbed ${bestClimb} spot${s} since Monday — from #${bestFrom} to #${bestTo}!`,
-    `${bestName} is gaining momentum — up ${bestClimb} place${s} since the start of the week.`,
-    `Best week-on-week climber: ${bestName}, up ${bestClimb} spot${s} since Monday! 🚀`,
+    `📈 ${bestName} has climbed ${bestClimb} spot${s} since the 1st — from #${bestFrom} to #${bestTo}!`,
+    `${bestName} is gaining momentum — up ${bestClimb} place${s} since the start of the month.`,
+    `Best month-on-month climber: ${bestName}, up ${bestClimb} spot${s} since the 1st! 🚀`,
   ]);
 }
 
@@ -241,7 +240,7 @@ function generateInsights(cur: LeaderboardRow[], h: InsightHistory): string[] {
     ...add(insightLeaderStreak(cur, h),  80),
     ...add(insightProximity(cur),        75),
     ...add(insightComeback(cur, h),      70),
-    ...add(insightWeekClimber(cur, h),   65),
+    ...add(insightMonthClimber(cur, h),  65),
     ...add(insightMomentumDown(cur, h),  60),
     ...add(insightSessionGain(cur, h),   55),
     ...add(insightFallback(cur),         10),
@@ -952,7 +951,7 @@ export default function Dashboard() {
                         marginBottom: 8,
                       }}
                     >
-                      👑 #1 This Week
+                      👑 #1 This Month
                     </div>
                     <div style={{ color: "#fff", fontSize: 40, fontWeight: 800, lineHeight: 1.15 }}>
                       {top1.name}
