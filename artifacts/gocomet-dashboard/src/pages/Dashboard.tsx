@@ -223,6 +223,11 @@ function insightMonthClimber(cur: LeaderboardRow[], h: InsightHistory): string |
 
 function insightFallback(cur: LeaderboardRow[]): string {
   if (cur.length === 0) return "Loading leaderboard data...";
+  if (cur[0].pipeline === 0) {
+    if (cur.length === 1) return `${cur[0].name} is ready to go — no pipeline yet.`;
+    const names = cur.slice(0, 4).map(r => r.name).join(", ");
+    return `All even at $0 — ${names} are all tied. First pipeline wins! 🚀`;
+  }
   const topStr = cur[0].pipeline.toLocaleString();
   if (cur.length === 1) return `${cur[0].name} is leading with $${topStr} in pipeline.`;
   const chasing = cur.slice(1, 4).map(r => `${r.name} ($${r.pipeline.toLocaleString()})`).join(", ");
@@ -676,7 +681,7 @@ export default function Dashboard() {
   const CONTENT_H = TV_H - NAV_H - PADDING * 2;
   const LEFT_W = TV_W * 0.68 - PADDING * 1.5;
 
-  const TOP1_BANNER_H = top1 ? 192 : 0;
+  const TOP1_BANNER_H = (top1 && top1.pipeline > 0) ? 192 : 0;
   const PANEL_HEADER_H = 60;
   const PANEL_FOOTER_H = 36;
   const INSIGHTS_H = 90;
@@ -886,7 +891,7 @@ export default function Dashboard() {
               </div>
 
               {/* #1 banner */}
-              {top1 && (
+              {top1 && top1.pipeline > 0 && (
                 <div
                   key={top1.name}
                   style={{
@@ -1046,7 +1051,7 @@ export default function Dashboard() {
                       {leaderboard.map((row, i) => (
                         <tr
                           key={row.name}
-                          className={`lb-row ${i === 0 ? "gold-row" : ""}`}
+                          className={`lb-row ${i === 0 && row.pipeline > 0 ? "gold-row" : ""}`}
                           style={{
                             borderBottom: "1px solid #F3F4F6",
                             animationDelay: `${i * 0.04}s`,
@@ -1057,10 +1062,10 @@ export default function Dashboard() {
                               padding: "16px 32px",
                               fontSize: 22,
                               fontWeight: 700,
-                              color: i === 0 ? "#D97706" : "#9CA3AF",
+                              color: i === 0 && row.pipeline > 0 ? "#D97706" : "#9CA3AF",
                             }}
                           >
-                            {i === 0 ? (
+                            {i === 0 && row.pipeline > 0 ? (
                               <span style={{ display: "flex", alignItems: "center" }}>
                                 <span style={{ marginRight: 6 }}>👑</span>1
                               </span>
@@ -1072,8 +1077,8 @@ export default function Dashboard() {
                             style={{
                               padding: "16px 32px",
                               fontSize: 24,
-                              fontWeight: i === 0 ? 700 : 500,
-                              color: i === 0 ? "#1A1A2E" : "#374151",
+                              fontWeight: i === 0 && row.pipeline > 0 ? 700 : 500,
+                              color: i === 0 && row.pipeline > 0 ? "#1A1A2E" : "#374151",
                             }}
                           >
                             {row.name}
@@ -1084,7 +1089,7 @@ export default function Dashboard() {
                               textAlign: "right",
                               fontSize: 28,
                               fontWeight: 800,
-                              color: i === 0 ? "#FF6B35" : "#0A1F44",
+                              color: i === 0 && row.pipeline > 0 ? "#FF6B35" : "#0A1F44",
                             }}
                           >
                             ${row.pipeline.toLocaleString()}
