@@ -239,6 +239,7 @@ function insightFallback(cur: LeaderboardRow[]): string {
 }
 
 function generateInsights(cur: LeaderboardRow[], h: InsightHistory): string[] {
+  if (cur.length === 0 || cur[0].pipeline === 0) return [insightFallback(cur)];
   const add = (text: string | null, pri: number) => text ? [{ text, pri }] : [];
   return [
     ...add(insightMomentumUp(cur, h),    90),
